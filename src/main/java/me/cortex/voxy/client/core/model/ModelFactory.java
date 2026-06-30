@@ -164,7 +164,8 @@ public class ModelFactory {
 
 
         var blockState = this.mapper.getBlockStateFromBlockId(blockId);
-        if (blockState.getBlock() instanceof StairBlock sb) {
+        boolean isDomumMaterialVariant = DomumOrnamentumCompat.hasModelData(blockId);
+        if ((!isDomumMaterialVariant) && blockState.getBlock() instanceof StairBlock sb) {
                 /*
                 if (sb.baseState.hasProperty(BlockStateProperties.WATERLOGGED)) {
                     blockState = sb.baseState.setValue(BlockStateProperties.WATERLOGGED, blockState.getValue(BlockStateProperties.WATERLOGGED));

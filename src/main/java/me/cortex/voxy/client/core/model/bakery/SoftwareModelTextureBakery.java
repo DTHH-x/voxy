@@ -111,7 +111,7 @@ public class SoftwareModelTextureBakery {
 
         ModelData modelData = DomumOrnamentumCompat.getModelData(blockId, state);
         if (modelData == ModelData.EMPTY) {
-            bakeBlockModelLayer(model, state, layer, modelData, false);
+            bakeBlockModelLayer(model, state, layer, modelData, false, false);
             return;
         }
 
@@ -124,7 +124,7 @@ public class SoftwareModelTextureBakery {
         var random = new SingleThreadedRandomSource(42L);
         var renderTypes = model.getRenderTypes(state, random, modelData).asList();
         if (renderTypes.isEmpty()) {
-            bakeBlockModelLayer(model, state, layer, modelData, true);
+            bakeBlockModelLayer(model, state, layer, modelData, true, true);
             return;
         }
 
@@ -134,7 +134,7 @@ public class SoftwareModelTextureBakery {
         // in this Domum path so normal block baking stays allocation-free.
         Set<Integer> seenQuads = new HashSet<>();
         for (RenderType renderType : renderTypes) {
-            bakeBlockModelLayer(model, state, renderType, modelData, true, seenQuads);
+            bakeBlockModelLayer(model, state, renderType, modelData, true, true, seenQuads);
         }
     }
 
@@ -142,8 +142,9 @@ public class SoftwareModelTextureBakery {
                                      BlockState state,
                                      RenderType layer,
                                      ModelData modelData,
-                                     boolean useModelData) {
-        bakeBlockModelLayer(model, state, layer, modelData, useModelData, null);
+                                     boolean useModelData,
+                                     boolean clampDomumGeometry) {
+        bakeBlockModelLayer(model, state, layer, modelData, useModelData, clampDomumGeometry, null);
     }
 
     private void bakeBlockModelLayer(net.minecraft.client.resources.model.BakedModel model,
@@ -151,6 +152,7 @@ public class SoftwareModelTextureBakery {
                                      RenderType layer,
                                      ModelData modelData,
                                      boolean useModelData,
+                                     boolean clampDomumGeometry,
                                      Set<Integer> seenQuads) {
         for (Direction direction : new Direction[] { Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH,
                 Direction.WEST, Direction.EAST, null }) {
@@ -162,8 +164,12 @@ public class SoftwareModelTextureBakery {
                 if (seenQuads != null && !seenQuads.add(quadSignature(quad))) {
                     continue;
                 }
-                (layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC)
-                        .quad(quad, state.is(BlockTags.LEAVES), layer, state);
+                var vertexConsumer = layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC;
+                if (clampDomumGeometry) {
+                    vertexConsumer.quadClampedToUnitBlock(quad, state.is(BlockTags.LEAVES), layer, state);
+                } else {
+                    vertexConsumer.quad(quad, state.is(BlockTags.LEAVES), layer, state);
+                }
             }
         }
     }

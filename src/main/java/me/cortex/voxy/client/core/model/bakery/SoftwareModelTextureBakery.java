@@ -106,12 +106,40 @@ public class SoftwareModelTextureBakery {
                 .getBlockModel(state);
 
         ModelData modelData = DomumOrnamentumCompat.getModelData(blockId, state);
+        if (modelData == ModelData.EMPTY) {
+            bakeBlockModelLayer(model, state, layer, modelData, false);
+            return;
+        }
+
+        // Domum Ornamentum can replace different material components with blocks
+        // using different render layers, for example solid wood plus cutout leaves.
+        // Baking only ItemBlockRenderTypes.getChunkRenderType(state) drops or
+        // solidifies some of those quads, which shows up in Voxy as missing faces
+        // or large extra opaque faces.  Keep this narrow and cheap: only Domum
+        // virtual material ids use the model's own layer list.
+        var random = new SingleThreadedRandomSource(42L);
+        var renderTypes = model.getRenderTypes(state, random, modelData).asList();
+        if (renderTypes.isEmpty()) {
+            bakeBlockModelLayer(model, state, layer, modelData, true);
+            return;
+        }
+
+        for (RenderType renderType : renderTypes) {
+            bakeBlockModelLayer(model, state, renderType, modelData, true);
+        }
+    }
+
+    private void bakeBlockModelLayer(net.minecraft.client.resources.model.BakedModel model,
+                                     BlockState state,
+                                     RenderType layer,
+                                     ModelData modelData,
+                                     boolean useModelData) {
         for (Direction direction : new Direction[] { Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH,
                 Direction.WEST, Direction.EAST, null }) {
             var random = new SingleThreadedRandomSource(42L);
-            var quads = modelData == ModelData.EMPTY
-                    ? model.getQuads(state, direction, random)
-                    : model.getQuads(state, direction, random, modelData, layer);
+            var quads = useModelData
+                    ? model.getQuads(state, direction, random, modelData, layer)
+                    : model.getQuads(state, direction, random);
             for (var quad : quads) {
                 (layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC)
                         .quad(quad, state.is(BlockTags.LEAVES), layer, state);

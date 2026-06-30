@@ -54,8 +54,8 @@ public final class DomumOrnamentumCompat {
         int minY = sectionY << 4;
         int maxY = minY + 15;
 
-        try {
-            for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+        for (BlockEntity blockEntity : chunk.getBlockEntities().values()) {
+            try {
                 if (blockEntity == null || !isDomumBlockEntity(blockEntity)) {
                     continue;
                 }
@@ -65,13 +65,9 @@ public final class DomumOrnamentumCompat {
                     continue;
                 }
 
-                ModelData modelData = blockEntity.getModelData();
-                if (modelData == null || modelData == ModelData.EMPTY) {
-                    continue;
-                }
-
-                Object variantKey = extractVariantKey(blockEntity, modelData);
-                if (variantKey == null) {
+                ModelData originalModelData = blockEntity.getModelData();
+                Object textureData = extractTextureData(blockEntity, originalModelData);
+                if (textureData == null) {
                     continue;
                 }
 
@@ -83,7 +79,12 @@ public final class DomumOrnamentumCompat {
                     continue;
                 }
 
-                int mappedId = mapper.getIdForBlockStateVariant(state, variantKey);
+                ModelData modelData = ensureMaterialModelData(originalModelData, textureData);
+                if (modelData == ModelData.EMPTY) {
+                    continue;
+                }
+
+                int mappedId = mapper.getIdForBlockStateVariant(state, textureData);
                 MODEL_DATA_BY_BLOCK_ID.putIfAbsent(mappedId, modelData);
 
                 if (mappedIds == null) {
@@ -91,9 +92,10 @@ public final class DomumOrnamentumCompat {
                 }
                 int localIndex = lx | (lz << 4) | (ly << 8);
                 mappedIds[localIndex] = mappedId;
+            } catch (Throwable ignored) {
+                // Keep the rest of the section working if one Domum block entity is
+                // temporarily missing client model data or is otherwise invalid.
             }
-        } catch (Throwable ignored) {
-            mappedIds = null;
         }
 
         if (mappedIds == null) {
@@ -155,18 +157,33 @@ public final class DomumOrnamentumCompat {
         return name.startsWith(DOMUM_PACKAGE);
     }
 
-    private static Object extractVariantKey(BlockEntity blockEntity, ModelData modelData) {
+    public static boolean hasModelData(int blockId) {
+        return LOADED && MODEL_DATA_BY_BLOCK_ID.containsKey(blockId);
+    }
+
+    private static Object extractTextureData(BlockEntity blockEntity, ModelData modelData) {
         Object textureData = extractTextureDataFromModelData(modelData);
         if (textureData != null) {
             return textureData;
         }
 
-        textureData = extractTextureDataFromBlockEntity(blockEntity);
-        if (textureData != null) {
-            return textureData;
-        }
+        return extractTextureDataFromBlockEntity(blockEntity);
+    }
 
-        return null;
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static ModelData ensureMaterialModelData(ModelData modelData, Object textureData) {
+        ModelProperty property = getMaterialTextureProperty();
+        if (property == null || textureData == null) {
+            return ModelData.EMPTY;
+        }
+        try {
+            if (modelData != null && modelData != ModelData.EMPTY && modelData.has(property)) {
+                return modelData;
+            }
+            return ModelData.builder().with(property, textureData).build();
+        } catch (Throwable ignored) {
+            return ModelData.EMPTY;
+        }
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

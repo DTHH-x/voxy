@@ -805,6 +805,9 @@ public class ModelFactory {
     }
 
     private static BlockColor getColourProvider(BlockState blockState) {
+        if (isLumiseneFluidBlockState(blockState)) {
+            return null;
+        }
         Block block = blockState.getBlock();
         BlockState defaultState = block.defaultBlockState();
         var blockColors = Minecraft.getInstance().getBlockColors();
@@ -830,6 +833,15 @@ public class ModelFactory {
 
         FluidState fluidState = state.getFluidState();
         return !fluidState.isEmpty() && fluidState.createLegacyBlock().getBlock() == state.getBlock();
+    }
+
+    public static boolean isLumiseneFluidBlockState(BlockState state) {
+        FluidState fluidState = state.getFluidState();
+        if (fluidState.isEmpty()) {
+            return false;
+        }
+        var id = BuiltInRegistries.FLUID.getKey(fluidState.getType());
+        return id != null && id.getNamespace().equals("supplementaries") && id.getPath().equals("lumisene");
     }
 
     //TODO: add a method to detect biome dependent colours (can do by detecting if getColor is ever called)

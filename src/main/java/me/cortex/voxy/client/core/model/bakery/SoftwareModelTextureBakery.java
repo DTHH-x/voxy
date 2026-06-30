@@ -132,6 +132,13 @@ public class SoftwareModelTextureBakery {
             }
             @Override
             public int getBlockTint(BlockPos pos, ColorResolver colorResolver) {
+                if (ModelFactory.isLumiseneFluidBlockState(state)) {
+                    // Lumisene already has coloured sprites. Voxy's normal fluid tint path marks
+                    // pixels for biome tinting, which makes this custom fluid sample a zero/black
+                    // tint in LOD chunks. Baking white keeps the texture colour unchanged.
+                    return 0xFFFFFF;
+                }
+
                 //This is such a stupid and bad hack, we can inject tinting state here since this is called
                 // before the quad is added
                 //TODO: need to make a quad once tinting thing

@@ -1,0 +1,133 @@
+diff --git a/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java b/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java
+index 931d40a..786a735 100644
+--- a/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java
++++ b/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java
+@@ -120,6 +120,11 @@ public class SoftwareModelTextureBakery {
+     }
+ 
+     private void bakeFluidState(BlockState state, int face, RenderType layer) {
++        if (ModelFactory.isLumiseneFluidBlockState(state)) {
++            bakeLumiseneFluidState(state, face, layer);
++            return;
++        }
++
+         BlockAndTintGetter getter = new BlockAndTintGetter() {
+             @Override
+             public LevelLightEngine getLightEngine() {
+@@ -132,13 +137,6 @@ public class SoftwareModelTextureBakery {
+             }
+             @Override
+             public int getBlockTint(BlockPos pos, ColorResolver colorResolver) {
+-                if (ModelFactory.isLumiseneFluidBlockState(state)) {
+-                    // Lumisene already has coloured sprites. Voxy's normal fluid tint path marks
+-                    // pixels for biome tinting, which makes this custom fluid sample a zero/black
+-                    // tint in LOD chunks. Baking white keeps the texture colour unchanged.
+-                    return 0xFFFFFF;
+-                }
+-
+                 //This is such a stupid and bad hack, we can inject tinting state here since this is called
+                 // before the quad is added
+                 //TODO: need to make a quad once tinting thing
+@@ -210,6 +208,76 @@ public class SoftwareModelTextureBakery {
+         this.opaqueVC.setDefaultMeta(0);//Reset default meta
+     }
+ 
++    private void bakeLumiseneFluidState(BlockState state, int face, RenderType layer) {
++        // Supplementaries' Lumisene is a finite custom fluid. The vanilla/offline fluid
++        // tessellation path used by Voxy can produce a black baked texture for it even though
++        // the normal chunk renderer shows it correctly. For far LODs we only need a stable
++        // representative colour, so use a very small solid-colour fallback instead of adding
++        // heavier mod-specific model-data or sprite hooks.
++        ReuseVertexConsumer vc = layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC;
++        int oldMeta = vc.getDefaultMeta();
++        vc.setDefaultMeta(oldMeta | 8); // bit 8: SoftwareRasterizer uses vertex colour directly
++
++        float height = state.getFluidState().getOwnHeight();
++        if (height <= 0.0f) {
++            height = 14.0f / 16.0f;
++        }
++        height = Math.max(1.0f / 16.0f, Math.min(1.0f, height));
++
++        // ABGR for approximately #F7E1E2, sampled from Supplementaries' lumisene textures.
++        int colour = 0xFFE2E1F7;
++        switch (Direction.from3DDataValue(face)) {
++            case DOWN -> addSolidColourQuad(vc, colour,
++                    0, 0, 1,
++                    1, 0, 1,
++                    1, 0, 0,
++                    0, 0, 0);
++            case UP -> addSolidColourQuad(vc, colour,
++                    0, height, 0,
++                    1, height, 0,
++                    1, height, 1,
++                    0, height, 1);
++            case NORTH -> addSolidColourQuad(vc, colour,
++                    1, 0, 0,
++                    1, height, 0,
++                    0, height, 0,
++                    0, 0, 0);
++            case SOUTH -> addSolidColourQuad(vc, colour,
++                    0, 0, 1,
++                    0, height, 1,
++                    1, height, 1,
++                    1, 0, 1);
++            case WEST -> addSolidColourQuad(vc, colour,
++                    0, 0, 0,
++                    0, height, 0,
++                    0, height, 1,
++                    0, 0, 1);
++            case EAST -> addSolidColourQuad(vc, colour,
++                    1, 0, 1,
++                    1, height, 1,
++                    1, height, 0,
++                    1, 0, 0);
++        }
++        vc.setDefaultMeta(oldMeta);
++    }
++
++    private static void addSolidColourQuad(ReuseVertexConsumer vc, int colour,
++                                           float x1, float y1, float z1,
++                                           float x2, float y2, float z2,
++                                           float x3, float y3, float z3,
++                                           float x4, float y4, float z4) {
++        addSolidColourVertex(vc, x1, y1, z1, 0, 0, colour);
++        addSolidColourVertex(vc, x2, y2, z2, 1, 0, colour);
++        addSolidColourVertex(vc, x3, y3, z3, 1, 1, colour);
++        addSolidColourVertex(vc, x4, y4, z4, 0, 1, colour);
++    }
++
++    private static void addSolidColourVertex(ReuseVertexConsumer vc, float x, float y, float z, float u, float v, int colour) {
++        vc.addVertex(x, y, z);
++        vc.setColor(colour);
++        vc.setUv(u, v);
++    }
++
+     private static boolean shouldReturnAirForFluid(BlockPos pos, int face) {
+         var fv = Direction.from3DDataValue(face).getNormal();
+         int dot = fv.getX() * pos.getX() + fv.getY() * pos.getY() + fv.getZ() * pos.getZ();
+diff --git a/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java b/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java
+index 037b4fa..52fae31 100644
+--- a/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java
++++ b/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java
+@@ -176,9 +176,18 @@ public class SoftwareRasterizer {
+         float u = Math.fma(b1, this.a1.y, Math.fma(b2, this.a2.y, b3 * this.a3.y));
+         float v = Math.fma(b1, this.a1.z, Math.fma(b2, this.a2.z, b3 * this.a3.z));
+ 
+-        int colour = this.sampleTexture(u,v);//The ABGR colour of this pixel
+-        if (this.quadColour != 0xFFFFFFFF) {
+-            colour = multiplyAbgr(colour, this.quadColour);
++        int colour;
++        if ((meta & 8) != 0) {
++            // Voxy normally samples the terrain atlas for every baked quad. Some custom fluids
++            // (for example Supplementaries' Lumisene finite fluid) do not bake correctly through
++            // the vanilla fluid tessellator in this offline path, producing a black atlas sample.
++            // Metadata bit 8 marks a tiny fallback path where the quad colour is already final.
++            colour = this.quadColour;
++        } else {
++            colour = this.sampleTexture(u,v);//The ABGR colour of this pixel
++            if (this.quadColour != 0xFFFFFFFF) {
++                colour = multiplyAbgr(colour, this.quadColour);
++            }
+         }
+ 
+ 

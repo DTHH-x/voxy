@@ -177,7 +177,7 @@ public class ModelFactory {
 
         //Before we enqueue the baking of this blockstate, we must check if it has a fluid state associated with it
         // if it does, we must ensure that it is (effectivly) baked BEFORE we bake this blockstate
-        boolean isFluid = blockState.getBlock() instanceof LiquidBlock;
+        boolean isFluid = isFluidBlockState(blockState);
         if ((!isFluid) && (!blockState.getFluidState().isEmpty())) {
             //Insert into the fluid LUT
             var fluidState = blockState.getFluidState().createLegacyBlock();
@@ -225,7 +225,7 @@ public class ModelFactory {
         if (bake == null) return false;
         ColourDepthTextureData[] textureData = new ColourDepthTextureData[6];
 
-        int flags = this.bakery2.renderToOutput(bake.state, this.bakeScratchBuffer);
+        int flags = this.bakery2.renderToOutput(bake.blockId, bake.state, this.bakeScratchBuffer);
 
 
         {//Create texture data
@@ -400,7 +400,7 @@ public class ModelFactory {
 
         //TODO: add thing for `blockState.hasEmissiveLighting()` and `blockState.getLuminance()`
 
-        boolean isFluid = blockState.getBlock() instanceof LiquidBlock;
+        boolean isFluid = isFluidBlockState(blockState);
         int modelId = -1;
 
 
@@ -418,7 +418,7 @@ public class ModelFactory {
             }
         }
 
-        var colourProvider = getColourProvider(blockState.getBlock());
+        var colourProvider = getColourProvider(blockState);
 
         boolean isBiomeColourDependent = false;
         if (colourProvider != null) {
@@ -785,7 +785,7 @@ public class ModelFactory {
         int i = 0;
         long modelUpPtr = result.modelBiomeIndexPairs.address;
         for (var entry : this.modelsRequiringBiomeColours) {
-            var colourProvider = getColourProvider(entry.right().getBlock());
+            var colourProvider = getColourProvider(entry.right());
             if (colourProvider == null) {
                 throw new IllegalStateException();
             }
@@ -804,10 +804,11 @@ public class ModelFactory {
         return result;
     }
 
-    private static BlockColor getColourProvider(Block block) {
+    private static BlockColor getColourProvider(BlockState blockState) {
+        Block block = blockState.getBlock();
         BlockState defaultState = block.defaultBlockState();
         var blockColors = Minecraft.getInstance().getBlockColors();
-        if (block instanceof LiquidBlock) {
+        if (isFluidBlockState(blockState) || isFluidBlockState(defaultState)) {
             return (state, world, pos, tintIndex) -> blockColors.getColor(state, world, pos, tintIndex);
         }
         int color;
@@ -820,6 +821,15 @@ public class ModelFactory {
             return (state, world, pos, tintIndex) -> blockColors.getColor(state, world, pos, tintIndex);
         }
         return null;
+    }
+
+    public static boolean isFluidBlockState(BlockState state) {
+        if (state.getBlock() instanceof LiquidBlock) {
+            return true;
+        }
+
+        FluidState fluidState = state.getFluidState();
+        return !fluidState.isEmpty() && fluidState.createLegacyBlock().getBlock() == state.getBlock();
     }
 
     //TODO: add a method to detect biome dependent colours (can do by detecting if getColor is ever called)

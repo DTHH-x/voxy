@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import me.cortex.voxy.client.core.model.ModelFactory;
 import me.cortex.voxy.common.util.UnsafeUtil;
+import me.cortex.voxy.commonImpl.compat.DomumOrnamentumCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
@@ -19,12 +20,12 @@ import net.minecraft.world.level.ColorResolver;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
-import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.SingleThreadedRandomSource;
 import net.minecraft.world.level.lighting.LevelLightEngine;
+import net.neoforged.neoforge.client.model.data.ModelData;
 import net.minecraft.world.level.material.FluidState;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
@@ -95,7 +96,7 @@ public class SoftwareModelTextureBakery {
         this.rasterizer.setSamplerTexture(pixels, width, height);
     }
 
-    private void bakeBlockModel(BlockState state, RenderType layer) {
+    private void bakeBlockModel(int blockId, BlockState state, RenderType layer) {
         if (state.getRenderShape() == RenderShape.INVISIBLE) {
             return;// Dont bake if invisible
         }
@@ -104,12 +105,16 @@ public class SoftwareModelTextureBakery {
                 .getBlockModelShaper()
                 .getBlockModel(state);
 
+        ModelData modelData = DomumOrnamentumCompat.getModelData(blockId, state);
         for (Direction direction : new Direction[] { Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH,
                 Direction.WEST, Direction.EAST, null }) {
-            var quads = model.getQuads(state, direction, new SingleThreadedRandomSource(42L));
+            var random = new SingleThreadedRandomSource(42L);
+            var quads = modelData == ModelData.EMPTY
+                    ? model.getQuads(state, direction, random)
+                    : model.getQuads(state, direction, random, modelData, layer);
             for (var quad : quads) {
                 (layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC)
-                        .quad(quad, state.is(BlockTags.LEAVES), layer);
+                        .quad(quad, state.is(BlockTags.LEAVES), layer, state);
             }
         }
     }
@@ -216,16 +221,13 @@ public class SoftwareModelTextureBakery {
     // in this version the values are simply appended
     // (0,0),(1,0),(2,0),(0,1),(1,1),(2,1)
 
-    public int renderToOutput(BlockState state, long outputBuffer) {
+    public int renderToOutput(int blockId, BlockState state, long outputBuffer) {
         MemoryUtil.memSet(outputBuffer, 0, 16 * 16 * 8 * 6);
 
-        boolean isBlock = true;
-        if (state.getBlock() instanceof LiquidBlock) {
-            isBlock = false;
-        }
+        boolean isBlock = !ModelFactory.isFluidBlockState(state);
 
         RenderType blockRenderLayer = null;
-        if (state.getBlock() instanceof LiquidBlock) {
+        if (!isBlock) {
             blockRenderLayer = ItemBlockRenderTypes.getRenderLayer(state.getFluidState());
         } else {
             if (state.getBlock() instanceof LeavesBlock) {
@@ -248,7 +250,7 @@ public class SoftwareModelTextureBakery {
         if (isBlock) {
             this.opaqueVC.reset();
             this.translucentVC.reset();
-            this.bakeBlockModel(state, blockRenderLayer);
+            this.bakeBlockModel(blockId, state, blockRenderLayer);
             isAnyShaded |= this.opaqueVC.anyShaded | this.translucentVC.anyShaded;
             isAnyDarkend |= this.opaqueVC.anyDarkendTex | this.translucentVC.anyDarkendTex;
             anyTranslucent |= !this.translucentVC.isEmpty();
@@ -268,7 +270,7 @@ public class SoftwareModelTextureBakery {
             }
         } else {// Is fluid, slow path :(
 
-            if (!(state.getBlock() instanceof LiquidBlock))
+            if (!ModelFactory.isFluidBlockState(state))
                 throw new IllegalStateException();
             for (int i = 0; i < VIEWS.length; i++) {
                 this.opaqueVC.reset();

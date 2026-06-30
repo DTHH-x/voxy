@@ -120,11 +120,6 @@ public class SoftwareModelTextureBakery {
     }
 
     private void bakeFluidState(BlockState state, int face, RenderType layer) {
-        if (ModelFactory.isLumiseneFluidBlockState(state)) {
-            bakeLumiseneFluidState(state, face, layer);
-            return;
-        }
-
         BlockAndTintGetter getter = new BlockAndTintGetter() {
             @Override
             public LevelLightEngine getLightEngine() {
@@ -190,7 +185,11 @@ public class SoftwareModelTextureBakery {
 
             @Override
             public float getShade(Direction direction, boolean bl) {
-                return 0;
+                // Supplementaries' Lumisene already uses coloured sprites.  The normal
+                // offline fluid bake multiplies the sampled sprite by this shade value;
+                // returning 0 makes the baked LOD texture pure black.  Keep the fix
+                // narrow so vanilla water/lava and other fluids retain the old path.
+                return ModelFactory.isLumiseneFluidBlockState(state) ? 1.0f : 0.0f;
             }
         
         };
@@ -206,76 +205,6 @@ public class SoftwareModelTextureBakery {
         Minecraft.getInstance().getBlockRenderer().renderLiquid(BlockPos.ZERO, getter, vc, state, state.getFluidState());
         this.translucentVC.setDefaultMeta(0);//Reset default meta
         this.opaqueVC.setDefaultMeta(0);//Reset default meta
-    }
-
-    private void bakeLumiseneFluidState(BlockState state, int face, RenderType layer) {
-        // Supplementaries' Lumisene is a finite custom fluid. The vanilla/offline fluid
-        // tessellation path used by Voxy can produce a black baked texture for it even though
-        // the normal chunk renderer shows it correctly. For far LODs we only need a stable
-        // representative colour, so use a very small solid-colour fallback instead of adding
-        // heavier mod-specific model-data or sprite hooks.
-        ReuseVertexConsumer vc = layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC;
-        int oldMeta = vc.getDefaultMeta();
-        vc.setDefaultMeta(oldMeta | 8); // bit 8: SoftwareRasterizer uses vertex colour directly
-
-        float height = state.getFluidState().getOwnHeight();
-        if (height <= 0.0f) {
-            height = 14.0f / 16.0f;
-        }
-        height = Math.max(1.0f / 16.0f, Math.min(1.0f, height));
-
-        // ABGR for approximately #F7E1E2, sampled from Supplementaries' lumisene textures.
-        int colour = 0xFFE2E1F7;
-        switch (Direction.from3DDataValue(face)) {
-            case DOWN -> addSolidColourQuad(vc, colour,
-                    0, 0, 1,
-                    1, 0, 1,
-                    1, 0, 0,
-                    0, 0, 0);
-            case UP -> addSolidColourQuad(vc, colour,
-                    0, height, 0,
-                    1, height, 0,
-                    1, height, 1,
-                    0, height, 1);
-            case NORTH -> addSolidColourQuad(vc, colour,
-                    1, 0, 0,
-                    1, height, 0,
-                    0, height, 0,
-                    0, 0, 0);
-            case SOUTH -> addSolidColourQuad(vc, colour,
-                    0, 0, 1,
-                    0, height, 1,
-                    1, height, 1,
-                    1, 0, 1);
-            case WEST -> addSolidColourQuad(vc, colour,
-                    0, 0, 0,
-                    0, height, 0,
-                    0, height, 1,
-                    0, 0, 1);
-            case EAST -> addSolidColourQuad(vc, colour,
-                    1, 0, 1,
-                    1, height, 1,
-                    1, height, 0,
-                    1, 0, 0);
-        }
-        vc.setDefaultMeta(oldMeta);
-    }
-
-    private static void addSolidColourQuad(ReuseVertexConsumer vc, int colour,
-                                           float x1, float y1, float z1,
-                                           float x2, float y2, float z2,
-                                           float x3, float y3, float z3,
-                                           float x4, float y4, float z4) {
-        addSolidColourVertex(vc, x1, y1, z1, 0, 0, colour);
-        addSolidColourVertex(vc, x2, y2, z2, 1, 0, colour);
-        addSolidColourVertex(vc, x3, y3, z3, 1, 1, colour);
-        addSolidColourVertex(vc, x4, y4, z4, 0, 1, colour);
-    }
-
-    private static void addSolidColourVertex(ReuseVertexConsumer vc, float x, float y, float z, float u, float v, int colour) {
-        vc.addVertex(x, y, z);
-        vc.setColor(colour);
-        vc.setUv(u, v);
     }
 
     private static boolean shouldReturnAirForFluid(BlockPos pos, int face) {

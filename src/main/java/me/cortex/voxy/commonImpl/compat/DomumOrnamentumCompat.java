@@ -107,6 +107,14 @@ public final class DomumOrnamentumCompat {
         SECTION_MAPPED_BLOCK_IDS.remove();
     }
 
+    public static boolean hasSectionMappings() {
+        if (!LOADED) {
+            return false;
+        }
+        int[] mappedIds = SECTION_MAPPED_BLOCK_IDS.get();
+        return mappedIds != null;
+    }
+
     /**
      * Hot-path lookup used while converting 4096 voxels. For sections without
      * Domum material data this returns immediately. For sections with Domum data

@@ -11,7 +11,6 @@ import me.cortex.voxy.commonImpl.compat.DomumOrnamentumCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -37,10 +36,7 @@ import org.lwjgl.system.MemoryUtil;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -110,76 +106,17 @@ public class SoftwareModelTextureBakery {
                 .getBlockModel(state);
 
         ModelData modelData = DomumOrnamentumCompat.getModelData(blockId, state);
-        if (modelData == ModelData.EMPTY) {
-            bakeBlockModelLayer(model, state, layer, modelData, false, false);
-            return;
-        }
-
-        // Domum Ornamentum can replace different material components with blocks
-        // using different render layers, for example solid wood plus cutout leaves.
-        // Baking only ItemBlockRenderTypes.getChunkRenderType(state) drops or
-        // solidifies some of those quads, which shows up in Voxy as missing faces
-        // or large extra opaque faces.  Keep this narrow and cheap: only Domum
-        // virtual material ids use the model's own layer list.
-        var random = new SingleThreadedRandomSource(42L);
-        var renderTypes = model.getRenderTypes(state, random, modelData).asList();
-        if (renderTypes.isEmpty()) {
-            bakeBlockModelLayer(model, state, layer, modelData, true, true);
-            return;
-        }
-
-        // The same support quads can be returned by more than one Domum material
-        // render layer.  Drawing them multiple times changes Voxy's offline
-        // stencil/depth bake and produces extra or missing LOD faces.  Dedupe only
-        // in this Domum path so normal block baking stays allocation-free.
-        Set<Integer> seenQuads = new HashSet<>();
-        for (RenderType renderType : renderTypes) {
-            bakeBlockModelLayer(model, state, renderType, modelData, true, true, seenQuads);
-        }
-    }
-
-    private void bakeBlockModelLayer(net.minecraft.client.resources.model.BakedModel model,
-                                     BlockState state,
-                                     RenderType layer,
-                                     ModelData modelData,
-                                     boolean useModelData,
-                                     boolean clampDomumGeometry) {
-        bakeBlockModelLayer(model, state, layer, modelData, useModelData, clampDomumGeometry, null);
-    }
-
-    private void bakeBlockModelLayer(net.minecraft.client.resources.model.BakedModel model,
-                                     BlockState state,
-                                     RenderType layer,
-                                     ModelData modelData,
-                                     boolean useModelData,
-                                     boolean clampDomumGeometry,
-                                     Set<Integer> seenQuads) {
         for (Direction direction : new Direction[] { Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH,
                 Direction.WEST, Direction.EAST, null }) {
             var random = new SingleThreadedRandomSource(42L);
-            var quads = useModelData
-                    ? model.getQuads(state, direction, random, modelData, layer)
-                    : model.getQuads(state, direction, random);
+            var quads = modelData == ModelData.EMPTY
+                    ? model.getQuads(state, direction, random)
+                    : model.getQuads(state, direction, random, modelData, layer);
             for (var quad : quads) {
-                if (seenQuads != null && !seenQuads.add(quadSignature(quad))) {
-                    continue;
-                }
-                var vertexConsumer = layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC;
-                if (clampDomumGeometry) {
-                    vertexConsumer.quadClampedToUnitBlock(quad, state.is(BlockTags.LEAVES), layer, state);
-                } else {
-                    vertexConsumer.quad(quad, state.is(BlockTags.LEAVES), layer, state);
-                }
+                (layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC)
+                        .quad(quad, state.is(BlockTags.LEAVES), layer, state);
             }
         }
-    }
-
-    private static int quadSignature(BakedQuad quad) {
-        int result = Arrays.hashCode(quad.getVertices());
-        result = 31 * result + quad.getDirection().ordinal();
-        result = 31 * result + quad.getTintIndex();
-        result = 31 * result + quad.getSprite().contents().name().hashCode();
-        return result;
     }
 
     private void bakeFluidState(BlockState state, int face, RenderType layer) {

@@ -100,22 +100,6 @@ public final class ReuseVertexConsumer implements VertexConsumer {
     }
 
     public ReuseVertexConsumer quad(BakedQuad quad, boolean forceSolid, RenderType layer, BlockState state) {
-        return this.quadInternal(quad, forceSolid, layer, state, false);
-    }
-
-    /**
-     * Domum Ornamentum contains several materially-textured models whose JSON
-     * geometry intentionally extends outside the local block cube.  Voxy bakes a
-     * per-block impostor texture, so those overhanging vertices project as full
-     * cube faces or duplicated side cards in LOD.  Cropping only the Domum
-     * offline bake keeps normal blocks allocation-free and avoids changing the
-     * world conversion hot path.
-     */
-    public ReuseVertexConsumer quadClampedToUnitBlock(BakedQuad quad, boolean forceSolid, RenderType layer, BlockState state) {
-        return this.quadInternal(quad, forceSolid, layer, state, true);
-    }
-
-    private ReuseVertexConsumer quadInternal(BakedQuad quad, boolean forceSolid, RenderType layer, BlockState state, boolean clampToUnitBlock) {
         int meta = 0;
         meta |= forceSolid?0:(layer!=RenderType.solid()?1:0);//has discard
 
@@ -126,7 +110,7 @@ public final class ReuseVertexConsumer implements VertexConsumer {
                 meta |= 4;//has tinting, keep Voxy's normal biome/constant tint path
             }
         }
-        return this.quad(quad, meta, tintColour, clampToUnitBlock);
+        return this.quad(quad, meta, tintColour);
     }
 
     public ReuseVertexConsumer quad(BakedQuad quad, int metadata) {
@@ -134,10 +118,6 @@ public final class ReuseVertexConsumer implements VertexConsumer {
     }
 
     public ReuseVertexConsumer quad(BakedQuad quad, int metadata, int tintColour) {
-        return this.quad(quad, metadata, tintColour, false);
-    }
-
-    private ReuseVertexConsumer quad(BakedQuad quad, int metadata, int tintColour, boolean clampToUnitBlock) {
         this.anyShaded |= quad.isShade();
         this.anyDarkendTex |= false;// todo: what actually goes here??
         this.ensureCanPut();
@@ -149,27 +129,13 @@ public final class ReuseVertexConsumer implements VertexConsumer {
             if (tintColour != -1) {
                 colour = multiplyAbgr(colour, tintColour);
             }
-            float x = Float.intBitsToFloat(vertices[j]);
-            float y = Float.intBitsToFloat(vertices[j + 1]);
-            float z = Float.intBitsToFloat(vertices[j + 2]);
-            if (clampToUnitBlock) {
-                x = clamp01(x);
-                y = clamp01(y);
-                z = clamp01(z);
-            }
-            this.addVertex(x, y, z);
+            this.addVertex(Float.intBitsToFloat(vertices[j]), Float.intBitsToFloat(vertices[j + 1]), Float.intBitsToFloat(vertices[j + 2]));
             this.setColor(colour);
             this.setUv(Float.intBitsToFloat(vertices[j + 4]), Float.intBitsToFloat(vertices[j + 5]));
 
             this.meta(metadata|this.globalOrMetadata);
         }
         return this;
-    }
-
-    private static float clamp01(float value) {
-        if (value <= 0.0f) return 0.0f;
-        if (value >= 1.0f) return 1.0f;
-        return value;
     }
 
     private static int captureTintColour(BlockState state, int tintIndex) {

@@ -213,6 +213,12 @@ public class SoftwareModelTextureBakery {
         return dot >= 1;
     }
 
+    private static boolean isHorizontalFluidSideFace(int face) {
+        Direction direction = Direction.from3DDataValue(face);
+        return direction == Direction.NORTH || direction == Direction.SOUTH
+                || direction == Direction.WEST || direction == Direction.EAST;
+    }
+
     public void free() {
         this.opaqueVC.free();
         this.translucentVC.free();
@@ -277,6 +283,16 @@ public class SoftwareModelTextureBakery {
             if (!ModelFactory.isFluidBlockState(state))
                 throw new IllegalStateException();
             for (int i = 0; i < VIEWS.length; i++) {
+                // Lumisene's sprite-based fluid colour now bakes correctly, but its
+                // side faces appear as large vertical LOD cards around shorelines and
+                // holes. Keep the fix narrow and lightweight: only omit Lumisene's
+                // horizontal side-face bakes. The top and bottom faces still use the
+                // normal Minecraft renderLiquid() path, so the coloured fluid surface
+                // remains visible while the spurious walls disappear.
+                if (ModelFactory.isLumiseneFluidBlockState(state) && isHorizontalFluidSideFace(i)) {
+                    continue;
+                }
+
                 this.opaqueVC.reset();
                 this.translucentVC.reset();
                 this.bakeFluidState(state, i, blockRenderLayer);

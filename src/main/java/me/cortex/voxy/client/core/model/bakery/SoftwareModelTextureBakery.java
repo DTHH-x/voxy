@@ -11,6 +11,7 @@ import me.cortex.voxy.commonImpl.compat.DomumOrnamentumCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -36,7 +37,10 @@ import org.lwjgl.system.MemoryUtil;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -124,8 +128,13 @@ public class SoftwareModelTextureBakery {
             return;
         }
 
+        // The same support quads can be returned by more than one Domum material
+        // render layer.  Drawing them multiple times changes Voxy's offline
+        // stencil/depth bake and produces extra or missing LOD faces.  Dedupe only
+        // in this Domum path so normal block baking stays allocation-free.
+        Set<Integer> seenQuads = new HashSet<>();
         for (RenderType renderType : renderTypes) {
-            bakeBlockModelLayer(model, state, renderType, modelData, true);
+            bakeBlockModelLayer(model, state, renderType, modelData, true, seenQuads);
         }
     }
 
@@ -134,6 +143,15 @@ public class SoftwareModelTextureBakery {
                                      RenderType layer,
                                      ModelData modelData,
                                      boolean useModelData) {
+        bakeBlockModelLayer(model, state, layer, modelData, useModelData, null);
+    }
+
+    private void bakeBlockModelLayer(net.minecraft.client.resources.model.BakedModel model,
+                                     BlockState state,
+                                     RenderType layer,
+                                     ModelData modelData,
+                                     boolean useModelData,
+                                     Set<Integer> seenQuads) {
         for (Direction direction : new Direction[] { Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH,
                 Direction.WEST, Direction.EAST, null }) {
             var random = new SingleThreadedRandomSource(42L);
@@ -141,10 +159,21 @@ public class SoftwareModelTextureBakery {
                     ? model.getQuads(state, direction, random, modelData, layer)
                     : model.getQuads(state, direction, random);
             for (var quad : quads) {
+                if (seenQuads != null && !seenQuads.add(quadSignature(quad))) {
+                    continue;
+                }
                 (layer == RenderType.translucent() ? this.translucentVC : this.opaqueVC)
                         .quad(quad, state.is(BlockTags.LEAVES), layer, state);
             }
         }
+    }
+
+    private static int quadSignature(BakedQuad quad) {
+        int result = Arrays.hashCode(quad.getVertices());
+        result = 31 * result + quad.getDirection().ordinal();
+        result = 31 * result + quad.getTintIndex();
+        result = 31 * result + quad.getSprite().contents().name().hashCode();
+        return result;
     }
 
     private void bakeFluidState(BlockState state, int face, RenderType layer) {

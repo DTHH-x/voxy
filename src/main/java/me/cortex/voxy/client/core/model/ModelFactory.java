@@ -13,6 +13,7 @@ import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.Pair;
 import me.cortex.voxy.common.world.other.Mapper;
+import me.cortex.voxy.commonImpl.compat.DomumOrnamentumCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockColor;
 import net.minecraft.client.color.block.BlockColors;
@@ -288,6 +289,13 @@ public class ModelFactory {
         if (layer == null) {
             layer = RenderType.solid();
         }
+        // Domum Ornamentum material variants can contain cutout-like material
+        // quads even when the source block state itself reports a solid layer.
+        // Treat only those virtual ids as cutout for the offline texture analysis
+        // so transparent pixels do not turn into full opaque LOD panels.
+        if (DomumOrnamentumCompat.hasModelData(bake.blockId) && layer != RenderType.translucent()) {
+            layer = RenderType.cutout();
+        }
 
 
         var bakeResult = this.processTextureBakeResult(bake.blockId, bake.state, textureData, isShaded, hasDarkenedTextures, layer);
@@ -401,6 +409,7 @@ public class ModelFactory {
         //TODO: add thing for `blockState.hasEmissiveLighting()` and `blockState.getLuminance()`
 
         boolean isFluid = isFluidBlockState(blockState);
+        boolean isDomumMaterialVariant = DomumOrnamentumCompat.hasModelData(blockId);
         int modelId = -1;
 
 
@@ -522,6 +531,9 @@ public class ModelFactory {
         metadata |= ((!isFluid) && !blockState.getFluidState().isEmpty())?8:0;//Has a fluid state accosiacted with it and is not itself a fluid
         metadata |= isFluid?16:0;//Is a fluid
 
+        if (isDomumMaterialVariant) {
+            cullsSame = false;
+        }
         metadata |= cullsSame?32:0;
 
         boolean fullyOpaque = true;
@@ -546,6 +558,12 @@ public class ModelFactory {
 
             boolean faceCoversFullBlock = faceSize[0] == 0 && faceSize[2] == 0 &&
                     faceSize[1] == (MODEL_TEXTURE_SIZE-1) && faceSize[3] == (MODEL_TEXTURE_SIZE-1);
+            if (isDomumMaterialVariant) {
+                // Domum models are frequently partial/cutout retextured geometry.
+                // A single 16x16 projected LOD face that happens to fill the view
+                // must not be treated as a full cube face for occlusion.
+                faceCoversFullBlock = false;
+            }
 
             //TODO: use faceSize and the depths to compute if mesh can be correctly rendered
 
@@ -561,6 +579,9 @@ public class ModelFactory {
             if (occludesFace) {
                 occludesFace &= ((float)writeCount)/(MODEL_TEXTURE_SIZE * MODEL_TEXTURE_SIZE) > 0.9;// only occlude if the face covers more than 90% of the face
             }
+            if (isDomumMaterialVariant) {
+                occludesFace = false;
+            }
             metadata |= occludesFace?1:0;
             fullyOpaque &= occludesFace;
 
@@ -569,6 +590,9 @@ public class ModelFactory {
             boolean canBeOccluded = true;
             //TODO: make this an option on how far/close
             canBeOccluded &= offset < 0.3;//If the face is rendered far away from the other face, then it cant be occluded
+            if (isDomumMaterialVariant) {
+                canBeOccluded = false;
+            }
 
             metadata |= canBeOccluded?4:0;
 
@@ -595,6 +619,9 @@ public class ModelFactory {
             //Stuff like fences are solid, however they have extra side piece that mean it needs to have discard on
             int area = (faceSize[1]-faceSize[0]+1) * (faceSize[3]-faceSize[2]+1);
             boolean needsAlphaDiscard = ((float)writeCount)/area<0.9;//If the amount of area covered by written pixels is less than a threashold, disable discard as its not needed
+            if (isDomumMaterialVariant) {
+                needsAlphaDiscard = true;
+            }
 
             needsAlphaDiscard |= layer != RenderType.solid();
             needsAlphaDiscard &= layer != RenderType.translucent();//Translucent doesnt have alpha discard
